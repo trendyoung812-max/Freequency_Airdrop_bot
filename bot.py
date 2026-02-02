@@ -1,50 +1,21 @@
 import logging
 import os
 import asyncio
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler
 import sqlite3
 from datetime import datetime
-from typing import Dict, List, Optional
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler
 
-# Enable logging
+# Configure logging
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
 )
 logger = logging.getLogger(__name__)
 
-# Database setup
-DB_NAME = "airdrop_bot.db"
-
-def init_db():
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    
-    # Create users table
-    cursor.execute('''
-    CREATE TABLE IF NOT EXISTS users (
-        user_id INTEGER PRIMARY KEY,
-        username TEXT,
-        first_name TEXT,
-        current_step INTEGER DEFAULT 1,
-        task1_completed BOOLEAN DEFAULT 0,
-        task2_completed BOOLEAN DEFAULT 0,
-        task3_completed BOOLEAN DEFAULT 0,
-        task4_completed BOOLEAN DEFAULT 0,
-        task5_completed BOOLEAN DEFAULT 0,
-        wallet_address TEXT,
-        joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )
-    ''')
-    
-    # Create indexes for better performance
-    cursor.execute('CREATE INDEX IF NOT EXISTS idx_user_id ON users(user_id)')
-    cursor.execute('CREATE INDEX IF NOT EXISTS idx_username ON users(username)')
-    
-    conn.commit()
-    conn.close()
+# Constants
+DB_PATH = "/data/airdrop_bot.db"  # Persistent storage for Render
+os.makedirs("/data", exist_ok=True)
 
 # Task configuration
 TASKS = [
@@ -54,7 +25,7 @@ TASKS = [
         'description': 'Join our Telegram Group',
         'url': 'https://t.me/+UpEih_OErhA5YWZh',
         'button_text': '✅ Joined Group',
-        'verification_text': 'Have you joined the Telegram group?'
+        'verification_text': 'Click below after joining'
     },
     {
         'id': 2,
@@ -62,7 +33,7 @@ TASKS = [
         'description': 'Join our Telegram Channel',
         'url': 'https://t.me/+aCyF_M3PeV42OWIx',
         'button_text': '✅ Joined Channel',
-        'verification_text': 'Have you joined the Telegram channel?'
+        'verification_text': 'Click below after joining'
     },
     {
         'id': 3,
@@ -70,7 +41,7 @@ TASKS = [
         'description': 'Follow Twitter and retweet pinned post',
         'url': 'https://x.com/Freequencycoin',
         'button_text': '✅ Followed & Retweeted',
-        'verification_text': 'Have you followed and retweeted?'
+        'verification_text': 'Click below after following & retweeting'
     },
     {
         'id': 4,
@@ -78,7 +49,7 @@ TASKS = [
         'description': 'Tweet about Freequency',
         'url': 'https://x.com/compose/tweet',
         'button_text': '✅ Tweeted',
-        'verification_text': 'Have you tweeted about Freequency?'
+        'verification_text': 'Click below after tweeting'
     },
     {
         'id': 5,
@@ -86,123 +57,247 @@ TASKS = [
         'description': 'Visit Frequency.com',
         'url': 'https://www.freequency.net/freequency-crypto.html',
         'button_text': '✅ Visited Website',
-        'verification_text': 'Have you visited the website?'
+        'verification_text': 'Click below after visiting'
     }
 ]
 
 ADMINS = ['@dallen32', '@joyouschrs']
 
-class AirdropBot:
-    def __init__(self):
-        self.init_db()
-        
-    @staticmethod
-    def init_db():
-        init_db()
-    
-    @staticmethod
-    def get_user_progress(user_id: int):
-        """Get user progress from database"""
-        conn = sqlite3.connect(DB_NAME)
+# Database setup
+def init_db():
+    """Initialize SQLite database"""
+    try:
+        conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
         
+        # Create users table
         cursor.execute('''
-        SELECT current_step, task1_completed, task2_completed, task3_completed, task4_completed, task5_completed, 
-               username, wallet_address
-        FROM users WHERE user_id = ?
-        ''', (user_id,))
+        CREATE TABLE IF NOT EXISTS users (
+            user_id INTEGER PRIMARY KEY,
+            username TEXT,
+            first_name TEXT,
+            current_step INTEGER DEFAULT 1,
+            task1_completed INTEGER DEFAULT 0,
+            task2_completed INTEGER DEFAULT 0,
+            task3_completed INTEGER DEFAULT 0,
+            task4_completed INTEGER DEFAULT 0,
+            task5_completed INTEGER DEFAULT 0,
+            wallet_address TEXT,
+            joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        ''')
         
-        result = cursor.fetchone()
-        conn.close()
-        
-        if result:
-            return {
-                'current_step': result[0],
-                'tasks_completed': result[1:6],
-                'username': result[6],
-                'wallet_address': result[7]
-            }
-        return None
-    
-    @staticmethod
-    def update_user_step(user_id: int, step: int):
-        """Update user's current step"""
-        conn = sqlite3.connect(DB_NAME)
-        cursor = conn.cursor()
-        cursor.execute('UPDATE users SET current_step = ?, last_active = CURRENT_TIMESTAMP WHERE user_id = ?', 
-                      (step, user_id))
-        conn.commit()
-        conn.close()
-    
-    @staticmethod
-    def mark_task_completed(user_id: int, task_num: int):
-        """Mark a specific task as completed"""
-        conn = sqlite3.connect(DB_NAME)
-        cursor = conn.cursor()
-        cursor.execute(f'UPDATE users SET task{task_num}_completed = 1, last_active = CURRENT_TIMESTAMP WHERE user_id = ?', 
-                      (user_id,))
-        conn.commit()
-        conn.close()
-    
-    @staticmethod
-    def register_user(user_id: int, username: str, first_name: str):
-        """Register a new user"""
-        conn = sqlite3.connect(DB_NAME)
-        cursor = conn.cursor()
+        # Create user_progress table for better tracking
         cursor.execute('''
-        INSERT OR REPLACE INTO users (user_id, username, first_name, joined_at, last_active) 
-        VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-        ''', (user_id, username, first_name))
+        CREATE TABLE IF NOT EXISTS user_progress (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            task_id INTEGER,
+            completed INTEGER DEFAULT 0,
+            completed_at TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(user_id)
+        )
+        ''')
+        
         conn.commit()
-        conn.close()
+        logger.info("Database initialized successfully")
+    except Exception as e:
+        logger.error(f"Database initialization error: {e}")
+    finally:
+        if conn:
+            conn.close()
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handler for /start command"""
+def get_db_connection():
+    """Get database connection with retry logic"""
+    try:
+        return sqlite3.connect(DB_PATH)
+    except Exception as e:
+        logger.error(f"Database connection error: {e}")
+        raise
+
+class UserManager:
+    """Manages user data and progress"""
+    
+    @staticmethod
+    def get_or_create_user(user_id, username, first_name):
+        """Get existing user or create new one"""
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        try:
+            # Check if user exists
+            cursor.execute('SELECT * FROM users WHERE user_id = ?', (user_id,))
+            user = cursor.fetchone()
+            
+            if not user:
+                # Create new user
+                cursor.execute('''
+                INSERT INTO users (user_id, username, first_name, joined_at, last_active)
+                VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                ''', (user_id, username, first_name))
+                conn.commit()
+                logger.info(f"New user created: {user_id} (@{username})")
+            else:
+                # Update last active
+                cursor.execute('''
+                UPDATE users SET last_active = CURRENT_TIMESTAMP, username = ?, first_name = ?
+                WHERE user_id = ?
+                ''', (username, first_name, user_id))
+                conn.commit()
+            
+            return True
+        except Exception as e:
+            logger.error(f"Error in get_or_create_user: {e}")
+            return False
+        finally:
+            conn.close()
+    
+    @staticmethod
+    def get_user_progress(user_id):
+        """Get user's current progress"""
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        try:
+            cursor.execute('''
+            SELECT current_step, task1_completed, task2_completed, task3_completed, 
+                   task4_completed, task5_completed, wallet_address
+            FROM users WHERE user_id = ?
+            ''', (user_id,))
+            
+            result = cursor.fetchone()
+            if result:
+                return {
+                    'current_step': result[0],
+                    'tasks_completed': [bool(result[i]) for i in range(1, 6)],
+                    'wallet_address': result[6]
+                }
+            return None
+        finally:
+            conn.close()
+    
+    @staticmethod
+    def update_user_step(user_id, step):
+        """Update user's current step"""
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        try:
+            cursor.execute('''
+            UPDATE users SET current_step = ?, last_active = CURRENT_TIMESTAMP
+            WHERE user_id = ?
+            ''', (step, user_id))
+            conn.commit()
+            return True
+        except Exception as e:
+            logger.error(f"Error updating user step: {e}")
+            return False
+        finally:
+            conn.close()
+    
+    @staticmethod
+    def mark_task_completed(user_id, task_num):
+        """Mark a specific task as completed"""
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        try:
+            cursor.execute(f'''
+            UPDATE users SET task{task_num}_completed = 1, last_active = CURRENT_TIMESTAMP
+            WHERE user_id = ?
+            ''', (user_id,))
+            
+            # Also update current_step to next task
+            if task_num < 5:
+                cursor.execute('''
+                UPDATE users SET current_step = ? WHERE user_id = ? AND current_step = ?
+                ''', (task_num + 1, user_id, task_num))
+            
+            conn.commit()
+            return True
+        except Exception as e:
+            logger.error(f"Error marking task completed: {e}")
+            return False
+        finally:
+            conn.close()
+    
+    @staticmethod
+    def reset_user_progress(user_id):
+        """Reset user's progress"""
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        try:
+            cursor.execute('''
+            UPDATE users SET 
+                current_step = 1,
+                task1_completed = 0,
+                task2_completed = 0,
+                task3_completed = 0,
+                task4_completed = 0,
+                task5_completed = 0,
+                wallet_address = NULL,
+                last_active = CURRENT_TIMESTAMP
+            WHERE user_id = ?
+            ''', (user_id,))
+            conn.commit()
+            return True
+        except Exception as e:
+            logger.error(f"Error resetting user progress: {e}")
+            return False
+        finally:
+            conn.close()
+
+# Bot Handlers
+async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /start command"""
     user = update.effective_user
     user_id = user.id
-    username = user.username
-    first_name = user.first_name
+    username = user.username or "NoUsername"
+    first_name = user.first_name or "User"
     
-    # Register or update user
-    AirdropBot.register_user(user_id, username, first_name)
+    logger.info(f"User {user_id} (@{username}) started the bot")
+    
+    # Register user
+    UserManager.get_or_create_user(user_id, username, first_name)
     
     # Get user progress
-    progress = AirdropBot.get_user_progress(user_id)
-    if progress:
-        current_step = progress['current_step']
-    else:
-        current_step = 1
-        AirdropBot.update_user_step(user_id, current_step)
+    progress = UserManager.get_user_progress(user_id)
+    current_step = progress['current_step'] if progress else 1
     
-    # Send welcome message
-    welcome_message = """
-🚀 *Welcome to Freequency Airdrop Bot!* 🚀
+    # Welcome message
+    welcome_text = """
+🤖 *Welcome to Freequency Airdrop Bot* 🤖
 
-💰 *Earn 100 FREQC tokens* by completing social tasks
+💰 *Earn 100 FREQC tokens* by completing simple social tasks!
 
 📋 *How it works:*
-1. Complete tasks in order
+1. Complete tasks in order (one after another)
 2. Each task must be verified before moving to next
 3. After all tasks, contact admins with proof
-4. Receive your reward!
+4. Receive your 100 FREQC reward!
 
-Click the button below to start with Task 1!
+*Note:* Tasks must be completed sequentially. You cannot skip any task.
+
+Click below to begin! 👇
 """
     
     keyboard = [
-        [InlineKeyboardButton("🎯 Start Tasks", callback_data="start_tasks")],
-        [InlineKeyboardButton("📊 Check Progress", callback_data="check_progress")]
+        [InlineKeyboardButton("🚀 Start Tasks", callback_data="start_tasks")],
+        [InlineKeyboardButton("📊 My Progress", callback_data="check_progress")]
     ]
+    
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     await update.message.reply_text(
-        welcome_message,
+        welcome_text,
         reply_markup=reply_markup,
         parse_mode='Markdown'
     )
 
-async def show_task(update: Update, context: ContextTypes.DEFAULT_TYPE, task_number: int, user_id: int = None):
-    """Show a specific task to the user"""
+async def show_task_screen(update: Update, context: ContextTypes.DEFAULT_TYPE, task_number: int, user_id: int = None):
+    """Display a specific task to user"""
     if not user_id:
         user_id = update.effective_user.id
     
@@ -210,37 +305,35 @@ async def show_task(update: Update, context: ContextTypes.DEFAULT_TYPE, task_num
         query = update.callback_query
         await query.answer()
     
-    if task_number <= len(TASKS):
-        task = TASKS[task_number - 1]
-        
-        # Get user progress
-        progress = AirdropBot.get_user_progress(user_id)
-        if not progress:
-            await context.bot.send_message(
-                chat_id=user_id,
-                text="Please use /start to begin the airdrop."
-            )
-            return
-        
-        tasks_completed = progress['tasks_completed']
-        
-        # Create progress bar
-        progress_text = "📊 *Your Progress:*\n"
-        total_tasks = len(TASKS)
-        completed_count = sum(tasks_completed)
-        
-        # Progress bar visualization
-        progress_bar = "🟢" * completed_count + "⚪" * (total_tasks - completed_count)
-        
-        progress_text += f"{progress_bar}\n"
-        progress_text += f"✅ {completed_count}/{total_tasks} tasks completed\n\n"
-        
-        for i, t in enumerate(TASKS, 1):
-            status = "✅" if tasks_completed[i-1] else f"{i}."
-            progress_text += f"{status} {t['name']}\n"
-        
-        # Task message
-        message = f"""
+    if task_number > len(TASKS):
+        await show_completion_screen(update, context, user_id)
+        return
+    
+    task = TASKS[task_number - 1]
+    progress = UserManager.get_user_progress(user_id)
+    
+    if not progress:
+        await context.bot.send_message(
+            chat_id=user_id,
+            text="❌ Please use /start to begin the airdrop."
+        )
+        return
+    
+    # Create progress summary
+    completed_tasks = progress['tasks_completed']
+    completed_count = sum(completed_tasks)
+    total_tasks = len(TASKS)
+    
+    progress_text = "📊 *Your Progress:*\n"
+    for i, t in enumerate(TASKS, 1):
+        status = "✅" if completed_tasks[i-1] else "⭕"
+        current = "📍" if i == task_number else ""
+        progress_text += f"{current} {status} Task {i}: {t['name']}\n"
+    
+    progress_text += f"\n✅ Completed: {completed_count}/{total_tasks}"
+    
+    # Task message
+    message = f"""
 💰 *Task {task_number}: {task['name']}*
 
 {task['description']}
@@ -249,33 +342,32 @@ async def show_task(update: Update, context: ContextTypes.DEFAULT_TYPE, task_num
 
 {progress_text}
 
-*Note:* Complete this task and verify it before proceeding to the next.
-        """
-        
-        # Create buttons
-        keyboard = [
-            [InlineKeyboardButton("🔗 Open Link", url=task['url'])],
-            [InlineKeyboardButton(task['button_text'], callback_data=f"verify_{task_number}")]
-        ]
-        
-        # Add navigation buttons
-        nav_buttons = []
-        if task_number > 1:
-            nav_buttons.append(InlineKeyboardButton("◀️ Previous", callback_data=f"task_{task_number-1}"))
-        
-        if task_number < len(TASKS):
-            nav_buttons.append(InlineKeyboardButton("Next ▶️", callback_data=f"task_{task_number+1}"))
-        else:
-            nav_buttons.append(InlineKeyboardButton("🏁 Finish", callback_data="all_done"))
-        
-        if nav_buttons:
-            keyboard.append(nav_buttons)
-        
-        keyboard.append([InlineKeyboardButton("📊 Progress", callback_data="check_progress")])
-        
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        # Send or edit message
+*Remember:* Complete this task first, then click verification button.
+"""
+    
+    # Create buttons
+    keyboard = [
+        [InlineKeyboardButton("🔗 Open Link", url=task['url'])],
+        [InlineKeyboardButton(task['button_text'], callback_data=f"verify_{task_number}")]
+    ]
+    
+    # Navigation buttons
+    nav_buttons = []
+    if task_number > 1:
+        nav_buttons.append(InlineKeyboardButton("◀️ Previous", callback_data=f"task_{task_number-1}"))
+    
+    if task_number < len(TASKS):
+        nav_buttons.append(InlineKeyboardButton("Next ▶️", callback_data=f"task_{task_number+1}"))
+    else:
+        nav_buttons.append(InlineKeyboardButton("🏁 Finish", callback_data="finish_all"))
+    
+    if nav_buttons:
+        keyboard.append(nav_buttons)
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    # Send or edit message
+    try:
         if update.callback_query:
             await update.callback_query.edit_message_text(
                 text=message,
@@ -291,12 +383,11 @@ async def show_task(update: Update, context: ContextTypes.DEFAULT_TYPE, task_num
                 parse_mode='Markdown',
                 disable_web_page_preview=True
             )
-    else:
-        # All tasks completed
-        await show_completion_message(update, context, user_id)
+    except Exception as e:
+        logger.error(f"Error showing task screen: {e}")
 
-async def show_completion_message(update: Update, context: ContextTypes.DEFAULT_TYPE, user_id: int = None):
-    """Show completion message after all tasks"""
+async def show_completion_screen(update: Update, context: ContextTypes.DEFAULT_TYPE, user_id: int = None):
+    """Show completion screen after all tasks"""
     if not user_id:
         user_id = update.effective_user.id
     
@@ -304,195 +395,199 @@ async def show_completion_message(update: Update, context: ContextTypes.DEFAULT_
         query = update.callback_query
         await query.answer()
     
-    message = f"""
-🎉 *CONGRATULATIONS!* 🎉
+    user = update.effective_user
+    username = user.username or "NoUsername"
+    
+    completion_message = f"""
+🎉 *CONGRATULATIONS! ALL TASKS COMPLETED!* 🎉
 
-You have successfully completed all social tasks for the Freequency Airdrop!
+✅ You have successfully completed all social tasks!
 
-💰 *You qualify for 100 FREQC tokens!*
+💰 *You qualify for:* **100 FREQC Tokens**
+
+---
 
 📋 *Next Steps:*
 
 1. 📸 *Take Screenshots* of all completed tasks
 2. 💼 *Prepare your wallet address* (ERC20/BEP20 compatible)
-3. 📤 *Contact our admins* with the following:
+3. 📤 *Contact our admins* with the proof:
 
 *Admins to Contact:*
 {ADMINS[0]}
 {ADMINS[1]}
 
 *Send them this information:*
-• Your Telegram: @{update.effective_user.username}
-• Screenshot proofs of all tasks
+• Your Telegram: @{username}
+• Screenshot proofs of all 5 tasks
 • Your wallet address
+
+---
 
 ⏳ *Verification Process:*
 - Admins will verify your submissions
 - Upon successful verification, tokens will be sent
 - Processing time: 24-48 hours
 
-Thank you for participating! 🚀
+*Thank you for participating in Freequency Airdrop!* 🚀
 """
     
     keyboard = [
-        [InlineKeyboardButton("📤 Contact Admins", url=f"https://t.me/{ADMINS[0].replace('@', '')}")],
-        [InlineKeyboardButton("🔄 Restart", callback_data="restart")]
+        [InlineKeyboardButton("📤 Contact Admin 1", url=f"https://t.me/{ADMINS[0].replace('@', '')}")],
+        [InlineKeyboardButton("📤 Contact Admin 2", url=f"https://t.me/{ADMINS[1].replace('@', '')}")],
+        [InlineKeyboardButton("🔄 Restart Airdrop", callback_data="restart_airdrop")]
     ]
+    
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    if update.callback_query:
-        await update.callback_query.edit_message_text(
-            text=message,
-            reply_markup=reply_markup,
-            parse_mode='Markdown'
-        )
-    else:
-        await context.bot.send_message(
-            chat_id=user_id,
-            text=message,
-            reply_markup=reply_markup,
-            parse_mode='Markdown'
-        )
+    try:
+        if update.callback_query:
+            await update.callback_query.edit_message_text(
+                text=completion_message,
+                reply_markup=reply_markup,
+                parse_mode='Markdown'
+            )
+        else:
+            await context.bot.send_message(
+                chat_id=user_id,
+                text=completion_message,
+                reply_markup=reply_markup,
+                parse_mode='Markdown'
+            )
+    except Exception as e:
+        logger.error(f"Error showing completion screen: {e}")
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle button callbacks"""
+    """Handle all button callbacks"""
     query = update.callback_query
     await query.answer()
     
     user_id = query.from_user.id
     data = query.data
     
+    logger.info(f"Button clicked by {user_id}: {data}")
+    
     if data == "start_tasks":
         # Start from task 1
-        AirdropBot.update_user_step(user_id, 1)
-        await show_task(update, context, 1, user_id)
+        UserManager.update_user_step(user_id, 1)
+        await show_task_screen(update, context, 1, user_id)
     
     elif data == "check_progress":
         await progress_command(update, context)
     
     elif data.startswith("task_"):
         task_num = int(data.split("_")[1])
-        AirdropBot.update_user_step(user_id, task_num)
-        await show_task(update, context, task_num, user_id)
+        UserManager.update_user_step(user_id, task_num)
+        await show_task_screen(update, context, task_num, user_id)
     
     elif data.startswith("verify_"):
         task_num = int(data.split("_")[1])
         
         # Mark task as completed
-        AirdropBot.mark_task_completed(user_id, task_num)
+        UserManager.mark_task_completed(user_id, task_num)
         
-        # Move to next task if available
+        # Show success message
+        await query.edit_message_text(
+            text=f"✅ *Task {task_num} Verified!*\n\nMoving to next task...",
+            parse_mode='Markdown'
+        )
+        
+        await asyncio.sleep(1)
+        
+        # Move to next task or show completion
         if task_num < len(TASKS):
-            next_task = task_num + 1
-            AirdropBot.update_user_step(user_id, next_task)
-            
-            # Show success message
-            await query.edit_message_text(
-                text=f"✅ *Task {task_num} Verified Successfully!*\n\nMoving to Task {next_task}...",
-                parse_mode='Markdown'
-            )
-            
-            await asyncio.sleep(1)
-            await show_task(update, context, next_task, user_id)
+            await show_task_screen(update, context, task_num + 1, user_id)
         else:
-            # All tasks completed
-            await query.edit_message_text(
-                text="🎉 *All Tasks Completed Successfully!*",
-                parse_mode='Markdown'
-            )
-            await asyncio.sleep(1)
-            await show_completion_message(update, context, user_id)
+            await show_completion_screen(update, context, user_id)
     
-    elif data == "all_done":
-        await show_completion_message(update, context, user_id)
+    elif data == "finish_all":
+        await show_completion_screen(update, context, user_id)
     
-    elif data == "restart":
-        # Reset user progress
-        conn = sqlite3.connect(DB_NAME)
-        cursor = conn.cursor()
-        cursor.execute('''
-        UPDATE users SET 
-        current_step = 1,
-        task1_completed = 0,
-        task2_completed = 0,
-        task3_completed = 0,
-        task4_completed = 0,
-        task5_completed = 0
-        WHERE user_id = ?
-        ''', (user_id,))
-        conn.commit()
-        conn.close()
+    elif data == "restart_airdrop":
+        # Reset progress
+        UserManager.reset_user_progress(user_id)
         
         await query.edit_message_text(
             text="🔄 *Progress Reset!* Starting from the beginning...",
             parse_mode='Markdown'
         )
+        
         await asyncio.sleep(1)
-        await show_task(update, context, 1, user_id)
+        await show_task_screen(update, context, 1, user_id)
 
 async def progress_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handler for /progress command"""
+    """Handle /progress command"""
     user_id = update.effective_user.id
-    progress = AirdropBot.get_user_progress(user_id)
+    progress = UserManager.get_user_progress(user_id)
     
     if not progress:
         await update.message.reply_text("Please use /start to begin the airdrop.")
         return
     
-    tasks_completed = progress['tasks_completed']
+    completed_tasks = progress['tasks_completed']
     current_step = progress['current_step']
+    completed_count = sum(completed_tasks)
     total_tasks = len(TASKS)
-    completed_count = sum(tasks_completed)
     
-    # Create detailed progress
+    # Create progress visualization
+    progress_bar = ""
+    for i in range(total_tasks):
+        if completed_tasks[i]:
+            progress_bar += "🟢"
+        elif i + 1 == current_step:
+            progress_bar += "🟡"
+        else:
+            progress_bar += "⚪"
+    
     progress_text = f"""
 📊 *Your Airdrop Progress*
 
-🎯 *Current Status:* {'All Tasks Completed! 🎉' if completed_count == total_tasks else f'Task {current_step} of {total_tasks}'}
+{progress_bar}
+✅ {completed_count}/{total_tasks} tasks completed
 
-📈 *Completion:* {completed_count}/{total_tasks} tasks
-{'⭐' * (completed_count if completed_count <= 5 else 5)}
+*Current Status:* {'🎉 All Tasks Completed!' if completed_count == total_tasks else f'Task {current_step} of {total_tasks}'}
 
 📋 *Task Breakdown:*
 """
     
     for i, task in enumerate(TASKS, 1):
-        status = "✅ Completed" if tasks_completed[i-1] else "⏳ Pending"
+        status = "✅ Completed" if completed_tasks[i-1] else ("⏳ Current" if i == current_step else "📝 Pending")
         progress_text += f"{i}. {task['name']}: {status}\n"
     
     if completed_count == total_tasks:
-        progress_text += f"\n🎉 *All tasks completed!*\nContact admins: {ADMINS[0]} or {ADMINS[1]}"
+        progress_text += f"\n🎉 *Ready to claim!*\nContact admins: {ADMINS[0]} or {ADMINS[1]}"
     else:
-        current_task = TASKS[current_step-1] if current_step <= total_tasks else None
-        if current_task:
-            progress_text += f"\n👉 *Current Task:* {current_task['name']}\n"
-            progress_text += f"📝 *Description:* {current_task['description']}\n"
+        current_task = TASKS[current_step-1]
+        progress_text += f"\n👉 *Current Task:* {current_task['name']}"
     
     keyboard = []
     if completed_count < total_tasks:
         keyboard.append([InlineKeyboardButton("➡️ Continue Tasks", callback_data=f"task_{current_step}")])
     else:
-        keyboard.append([InlineKeyboardButton("📤 Contact Admins", url=f"https://t.me/{ADMINS[0].replace('@', '')}")])
+        keyboard.append([InlineKeyboardButton("📤 Contact Admins", callback_data="finish_all")])
     
-    keyboard.append([InlineKeyboardButton("🔄 Restart", callback_data="restart")])
+    keyboard.append([InlineKeyboardButton("🔄 Restart", callback_data="restart_airdrop")])
     
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    if update.message:
-        await update.message.reply_text(
-            progress_text,
-            reply_markup=reply_markup,
-            parse_mode='Markdown'
-        )
-    elif update.callback_query:
-        await update.callback_query.edit_message_text(
-            progress_text,
-            reply_markup=reply_markup,
-            parse_mode='Markdown'
-        )
+    try:
+        if update.message:
+            await update.message.reply_text(
+                progress_text,
+                reply_markup=reply_markup,
+                parse_mode='Markdown'
+            )
+        elif update.callback_query:
+            await update.callback_query.edit_message_text(
+                progress_text,
+                reply_markup=reply_markup,
+                parse_mode='Markdown'
+            )
+    except Exception as e:
+        logger.error(f"Error in progress command: {e}")
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handler for /help command"""
+    """Handle /help command"""
     help_text = """
 🤖 *Freequency Airdrop Bot Help*
 
@@ -501,16 +596,14 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 /progress - Check your current progress
 /help - Show this help message
 /reset - Reset your progress (start over)
-/stats - Admin statistics (admin only)
 
 *How it works:*
 1. Complete 5 social tasks in order
-2. Verify each task before proceeding
+2. Each task must be verified before next
 3. After all tasks, contact admins with proof
 4. Receive 100 FREQC tokens
 
-*Contact Admins:*
-If you have any issues, contact:
+*Contact Admins for help:*
 @dallen32 or @joyouschrs
 
 Good luck! 🚀
@@ -518,98 +611,89 @@ Good luck! 🚀
     await update.message.reply_text(help_text, parse_mode='Markdown')
 
 async def reset_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handler for /reset command"""
+    """Handle /reset command"""
     user_id = update.effective_user.id
     
-    # Reset user progress
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    cursor.execute('''
-    UPDATE users SET 
-    current_step = 1,
-    task1_completed = 0,
-    task2_completed = 0,
-    task3_completed = 0,
-    task4_completed = 0,
-    task5_completed = 0
-    WHERE user_id = ?
-    ''', (user_id,))
-    conn.commit()
-    conn.close()
+    UserManager.reset_user_progress(user_id)
     
     keyboard = [
-        [InlineKeyboardButton("🎯 Start Tasks", callback_data="start_tasks")]
+        [InlineKeyboardButton("🚀 Start Airdrop", callback_data="start_tasks")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     await update.message.reply_text(
-        "🔄 *Your progress has been reset successfully!*\n\nClick the button below to start from the beginning.",
+        "🔄 *Your progress has been reset!*\n\nClick below to start the airdrop from the beginning.",
         reply_markup=reply_markup,
         parse_mode='Markdown'
     )
 
 async def admin_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handler for /stats command (admin only)"""
+    """Handle /stats command (admin only)"""
     user = update.effective_user
     
     # Check if user is admin
     if f"@{user.username}" not in ADMINS:
-        await update.message.reply_text("❌ This command is for admins only.")
+        await update.message.reply_text("❌ Admin only command.")
         return
     
-    conn = sqlite3.connect(DB_NAME)
+    conn = get_db_connection()
     cursor = conn.cursor()
     
-    # Get statistics
-    cursor.execute('SELECT COUNT(*) FROM users')
-    total_users = cursor.fetchone()[0]
-    
-    cursor.execute('SELECT COUNT(*) FROM users WHERE task5_completed = 1')
-    completed_users = cursor.fetchone()[0]
-    
-    cursor.execute('''
-    SELECT username, joined_at 
-    FROM users 
-    WHERE task5_completed = 1 
-    ORDER BY joined_at DESC 
-    LIMIT 10
-    ''')
-    recent_completed = cursor.fetchall()
-    
-    cursor.execute('SELECT COUNT(*) FROM users WHERE date(joined_at) = date("now")')
-    today_users = cursor.fetchone()[0]
-    
-    conn.close()
-    
-    # Format statistics
-    stats_text = f"""
+    try:
+        # Get statistics
+        cursor.execute('SELECT COUNT(*) FROM users')
+        total_users = cursor.fetchone()[0]
+        
+        cursor.execute('SELECT COUNT(*) FROM users WHERE task5_completed = 1')
+        completed_users = cursor.fetchone()[0]
+        
+        # Today's stats
+        cursor.execute('SELECT COUNT(*) FROM users WHERE date(joined_at) = date("now")')
+        today_users = cursor.fetchone()[0]
+        
+        # Recent completions
+        cursor.execute('''
+        SELECT username, joined_at FROM users 
+        WHERE task5_completed = 1 
+        ORDER BY joined_at DESC 
+        LIMIT 5
+        ''')
+        recent_completions = cursor.fetchall()
+        
+        stats_text = f"""
 📊 *Admin Statistics*
 
-👥 *Total Users:* {total_users}
-✅ *Completed All Tasks:* {completed_users}
-📈 *Completion Rate:* {(completed_users/total_users*100 if total_users > 0 else 0):.1f}%
-📅 *New Users Today:* {today_users}
+👥 Total Users: {total_users}
+✅ Completed All Tasks: {completed_users}
+📅 New Users Today: {today_users}
+📈 Completion Rate: {(completed_users/total_users*100 if total_users > 0 else 0):.1f}%
 
 🏆 *Recent Completers:*
 """
-    
-    if recent_completed:
-        for i, (username, joined_at) in enumerate(recent_completed, 1):
-            stats_text += f"{i}. @{username or 'No username'} - {joined_at}\n"
-    else:
-        stats_text += "No users have completed all tasks yet.\n"
-    
-    await update.message.reply_text(stats_text, parse_mode='Markdown')
+        
+        if recent_completions:
+            for username, joined_at in recent_completions:
+                stats_text += f"• @{username or 'NoUsername'} - {joined_at}\n"
+        else:
+            stats_text += "No completions yet\n"
+        
+        await update.message.reply_text(stats_text, parse_mode='Markdown')
+        
+    except Exception as e:
+        logger.error(f"Error in admin_stats: {e}")
+        await update.message.reply_text(f"Error getting statistics: {e}")
+    finally:
+        conn.close()
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle regular messages"""
+    """Handle regular text messages"""
     user_id = update.effective_user.id
     message_text = update.message.text
     
-    # Check if message might be a wallet address
-    if len(message_text) >= 20 and any(keyword in message_text.lower() for keyword in ['0x', 'bc1', 'wallet', 'address']):
+    # Check if this looks like a wallet address
+    if len(message_text) >= 20 and any(keyword in message_text for keyword in ['0x', 'bc1', '1', '3', 'addr']):
         # Save wallet address
-        conn = sqlite3.connect(DB_NAME)
+        conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute('UPDATE users SET wallet_address = ? WHERE user_id = ?', 
                       (message_text, user_id))
@@ -623,35 +707,48 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode='Markdown'
         )
     else:
-        # Check user progress and show current task
-        progress = AirdropBot.get_user_progress(user_id)
+        # Show current task
+        progress = UserManager.get_user_progress(user_id)
         if progress:
             current_step = progress['current_step']
             if current_step <= len(TASKS):
-                await show_task(update, context, current_step, user_id)
+                await show_task_screen(update, context, current_step, user_id)
             else:
-                await show_completion_message(update, context, user_id)
+                await show_completion_screen(update, context, user_id)
 
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Log errors"""
+    """Handle errors"""
     logger.error(f"Update {update} caused error {context.error}")
+    
+    if update and update.effective_chat:
+        try:
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text="❌ An error occurred. Please try again or use /start"
+            )
+        except:
+            pass
 
 def main():
-    """Start the bot"""
+    """Main function to start the bot"""
     # Initialize database
-    AirdropBot.init_db()
+    init_db()
     
-    # Get bot token from environment variable
+    # Get bot token
     TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
     if not TOKEN:
-        logger.error("TELEGRAM_BOT_TOKEN environment variable not set")
+        logger.error("❌ TELEGRAM_BOT_TOKEN environment variable is not set!")
+        logger.info("Please set the token: export TELEGRAM_BOT_TOKEN='your_token_here'")
         return
     
-    # Create application with persistence
+    logger.info("🤖 Starting Freequency Airdrop Bot...")
+    logger.info(f"📊 Database path: {DB_PATH}")
+    
+    # Create application
     application = Application.builder().token(TOKEN).build()
     
     # Add handlers
-    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("progress", progress_command))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("reset", reset_command))
@@ -662,27 +759,14 @@ def main():
     # Add error handler
     application.add_error_handler(error_handler)
     
-    # Start the bot
-    logger.info("🤖 Freequency Airdrop Bot is starting...")
-    
-    if os.getenv('RENDER'):
-        # On Render, use webhook
-        PORT = int(os.getenv('PORT', 8443))
-        WEBHOOK_URL = os.getenv('WEBHOOK_URL')
-        
-        if WEBHOOK_URL:
-            application.run_webhook(
-                listen="0.0.0.0",
-                port=PORT,
-                url_path=TOKEN,
-                webhook_url=f"{WEBHOOK_URL}/{TOKEN}"
-            )
-        else:
-            # Fallback to polling
-            application.run_polling(allowed_updates=Update.ALL_TYPES)
-    else:
-        # Local development - use polling
-        application.run_polling(allowed_updates=Update.ALL_TYPES)
+    # Start polling
+    logger.info("🔄 Bot is now polling for updates...")
+    application.run_polling(
+        poll_interval=1.0,
+        timeout=10,
+        drop_pending_updates=True,
+        allowed_updates=Update.ALL_TYPES
+    )
 
 if __name__ == '__main__':
     main()
