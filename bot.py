@@ -13,9 +13,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Constants
-DB_PATH = "/data/airdrop_bot.db"  # Persistent storage for Render
-os.makedirs("/data", exist_ok=True)
+# Use a relative path for the database in the project directory
+DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "airdrop_bot.db")
 
 # Task configuration
 TASKS = [
@@ -55,7 +54,7 @@ TASKS = [
         'id': 5,
         'name': 'Visit Website',
         'description': 'Visit Frequency.com',
-        'url': 'https://freequency.net/crypto',  # UPDATED WEBSITE LINK
+        'url': 'https://freequency.net/crypto',
         'button_text': '✅ Visited Website',
         'verification_text': 'Click below after visiting'
     }
@@ -101,11 +100,12 @@ def init_db():
         ''')
         
         conn.commit()
-        logger.info("Database initialized successfully")
+        logger.info(f"Database initialized successfully at {DB_PATH}")
     except Exception as e:
         logger.error(f"Database initialization error: {e}")
+        raise
     finally:
-        if conn:
+        if 'conn' in locals():
             conn.close()
 
 def get_db_connection():
@@ -173,6 +173,9 @@ class UserManager:
                     'tasks_completed': [bool(result[i]) for i in range(1, 6)],
                     'wallet_address': result[6]
                 }
+            return None
+        except Exception as e:
+            logger.error(f"Error getting user progress: {e}")
             return None
         finally:
             conn.close()
