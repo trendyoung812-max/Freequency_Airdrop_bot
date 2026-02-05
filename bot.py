@@ -13,22 +13,11 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Constants - Fixed for Render disk storage
-# Render mounts persistent storage at /opt/render/project/.render
-DB_DIR = "/opt/render/project/.render"
-DB_PATH = os.path.join(DB_DIR, "airdrop_bot.db")
+# Constants
+DB_PATH = "/data/airdrop_bot.db"  # Persistent storage for Render
+os.makedirs("/data", exist_ok=True)
 
-# Create directory if it doesn't exist
-try:
-    os.makedirs(DB_DIR, exist_ok=True)
-    logger.info(f"Database directory created/verified: {DB_DIR}")
-except PermissionError:
-    # Fallback to project directory if no permission for /opt/render/project/.render
-    DB_DIR = os.path.dirname(os.path.abspath(__file__))
-    DB_PATH = os.path.join(DB_DIR, "airdrop_bot.db")
-    logger.info(f"Using project directory for database: {DB_DIR}")
-
-# Task configuration - UPDATED WEBSITE LINK
+# Task configuration
 TASKS = [
     {
         'id': 1,
@@ -66,7 +55,7 @@ TASKS = [
         'id': 5,
         'name': 'Visit Website',
         'description': 'Visit Frequency.com',
-        'url': 'https://freequency.net/crypto',  # UPDATED URL
+        'url': 'https://freequency.net/crypto',  # UPDATED WEBSITE LINK
         'button_text': '✅ Visited Website',
         'verification_text': 'Click below after visiting'
     }
@@ -112,7 +101,7 @@ def init_db():
         ''')
         
         conn.commit()
-        logger.info(f"Database initialized successfully at {DB_PATH}")
+        logger.info("Database initialized successfully")
     except Exception as e:
         logger.error(f"Database initialization error: {e}")
     finally:
