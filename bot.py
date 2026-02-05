@@ -13,9 +13,20 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Constants
-DB_PATH = "/data/airdrop_bot.db"  # Persistent storage for Render
-os.makedirs("/data", exist_ok=True)
+# Constants - Fixed for Render disk storage
+# Render mounts persistent storage at /opt/render/project/.render
+DB_DIR = "/opt/render/project/.render"
+DB_PATH = os.path.join(DB_DIR, "airdrop_bot.db")
+
+# Create directory if it doesn't exist
+try:
+    os.makedirs(DB_DIR, exist_ok=True)
+    logger.info(f"Database directory created/verified: {DB_DIR}")
+except PermissionError:
+    # Fallback to project directory if no permission for /opt/render/project/.render
+    DB_DIR = os.path.dirname(os.path.abspath(__file__))
+    DB_PATH = os.path.join(DB_DIR, "airdrop_bot.db")
+    logger.info(f"Using project directory for database: {DB_DIR}")
 
 # Task configuration - UPDATED WEBSITE LINK
 TASKS = [
@@ -101,7 +112,7 @@ def init_db():
         ''')
         
         conn.commit()
-        logger.info("Database initialized successfully")
+        logger.info(f"Database initialized successfully at {DB_PATH}")
     except Exception as e:
         logger.error(f"Database initialization error: {e}")
     finally:
