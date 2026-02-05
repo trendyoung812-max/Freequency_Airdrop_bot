@@ -55,7 +55,7 @@ TASKS = [
         'id': 5,
         'name': 'Visit Website',
         'description': 'Visit Frequency.com',
-        'url': 'https://www.freequency.net/freequency-crypto.html',
+        'url': 'https://www.freequency.net/crypto.html',
         'button_text': '✅ Visited Website',
         'verification_text': 'Click below after visiting'
     }
