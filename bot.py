@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 DB_PATH = "/data/airdrop_bot.db"  # Persistent storage for Render
 os.makedirs("/data", exist_ok=True)
 
-# Task configuration
+# Task configuration - UPDATED WEBSITE LINK
 TASKS = [
     {
         'id': 1,
@@ -55,7 +55,7 @@ TASKS = [
         'id': 5,
         'name': 'Visit Website',
         'description': 'Visit Frequency.com',
-        'url': 'https://www.freequency.net/crypto.html',
+        'url': 'https://freequency.net/crypto',  # UPDATED URL
         'button_text': '✅ Visited Website',
         'verification_text': 'Click below after visiting'
     }
