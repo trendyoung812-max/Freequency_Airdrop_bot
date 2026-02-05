@@ -13,8 +13,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Use a relative path for the database in the project directory
-DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "airdrop_bot.db")
+# Use a relative path for the database
+DB_PATH = "airdrop_bot.db"
 
 # Task configuration
 TASKS = [
@@ -87,17 +87,8 @@ def init_db():
         )
         ''')
         
-        # Create user_progress table for better tracking
-        cursor.execute('''
-        CREATE TABLE IF NOT EXISTS user_progress (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER,
-            task_id INTEGER,
-            completed INTEGER DEFAULT 0,
-            completed_at TIMESTAMP,
-            FOREIGN KEY (user_id) REFERENCES users(user_id)
-        )
-        ''')
+        # Create indexes
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_user_id ON users(user_id)')
         
         conn.commit()
         logger.info(f"Database initialized successfully at {DB_PATH}")
@@ -109,12 +100,8 @@ def init_db():
             conn.close()
 
 def get_db_connection():
-    """Get database connection with retry logic"""
-    try:
-        return sqlite3.connect(DB_PATH)
-    except Exception as e:
-        logger.error(f"Database connection error: {e}")
-        raise
+    """Get database connection"""
+    return sqlite3.connect(DB_PATH)
 
 class UserManager:
     """Manages user data and progress"""
@@ -747,8 +734,16 @@ def main():
     logger.info("🤖 Starting Freequency Airdrop Bot...")
     logger.info(f"📊 Database path: {DB_PATH}")
     
-    # Create application
-    application = Application.builder().token(TOKEN).build()
+    # Create application with compatibility fix
+    try:
+        application = Application.builder().token(TOKEN).build()
+    except Exception as e:
+        logger.error(f"Failed to create application: {e}")
+        # Try alternative approach
+        logger.info("Trying alternative application creation...")
+        from telegram.ext import Updater
+        updater = Updater(token=TOKEN, use_context=True)
+        application = updater.dispatcher.application
     
     # Add handlers
     application.add_handler(CommandHandler("start", start_command))
